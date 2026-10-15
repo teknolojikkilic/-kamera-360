@@ -219,9 +219,15 @@ setInterval(() => {
   }
 }, 30 * 1000);
 
-async function runStitch(room, shot) {
+// Ücretsiz sunucuda bellek kısıtlı: birleştirmeler sırayla, tek tek yapılır
+let stitchChain = Promise.resolve();
+function runStitch(room, shot) {
   shot.status = 'stitching'; shot.error = null;
   emitShot(room, shot);
+  stitchChain = stitchChain.then(() => doStitch(room, shot));
+}
+
+async function doStitch(room, shot) {
   try {
     const dir = path.join(DATA_DIR, room.code, shot.id);
     shot.result = await stitch({ dir, shot });

@@ -50,41 +50,94 @@ async function stitch({ dir, shot }) {
 
   const isVideo = shot.type === 'video';
   const W = isVideo ? OUT_W_VIDEO : OUT_W_PHOTO, H = W / 2;
-  // Girdileri küçült (hız için), sonra küreye yansıt
-  const pre = isVideo ? 'scale=w=1280:h=1280:force_original_aspect_ratio=decrease,' : '';
+
+  // İki görüntüyü aynı yüksekliğe getirip yan yana koyuyoruz; sonra tek bir remap ile küreye yansıtıyoruz.
+  // (v360 filtresi 512 MB'lık Render ücretsiz planına sığmıyor, remap çok daha az bellek kullanıyor.)
+  const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+  const Hc = isVideo
+    ? even(fw >= fh ? Math.min(fh, 1280 * fh / fw) : Math.min(fh, 1280))
+    : even(Math.min(fh, bh));
+  const fW = even(fw * Hc / fh), bW = even(bw * Hc / bh);
+  const xmapFile = path.join(dir, 'xmap.pgm'), ymapFile = path.join(dir, 'ymap.pgm');
+  buildMaps({ W, H, fW, bW, Hc, ff, bf, xmapFile, ymapFile });
+
+  const pre = (i, w) => `[${i}:v]${isVideo ? 'fps=30,' : ''}scale=${w}:${Hc},setsar=1[s${i}]`;
   const graph = [
-    `color=black:s=${W}x${H}${isVideo ? ':r=30' : ''}[bg]`,
-    `[0:v]${pre}v360=input=flat:output=equirect:ih_fov=${ff.h.toFixed(2)}:iv_fov=${ff.v.toFixed(2)}:alpha_mask=1:w=${W}:h=${H},format=yuva420p[f]`,
-    `[1:v]${pre}v360=input=flat:output=equirect:ih_fov=${bf.h.toFixed(2)}:iv_fov=${bf.v.toFixed(2)}:yaw=180:alpha_mask=1:w=${W}:h=${H},format=yuva420p[b]`,
-    `[bg][f]overlay=shortest=1[t]`,
-    `[t][b]overlay=shortest=1,format=yuv420p[v]`,
+    pre(0, fW), pre(1, bW),
+    `[s0][s1]hstack=inputs=2:shortest=1,format=yuv444p[st]`,
+    `[st][2:v][3:v]remap=fill=black,format=${isVideo ? 'yuv420p' : 'yuvj420p'}[v]`,
   ].join(';');
+  const mapInputs = ['-i', xmapFile, '-i', ymapFile]; // tek kare; remap son kareyi tekrar kullanır
 
-  if (!isVideo) {
-    const out = path.join(dir, '360.jpg');
-    await run(['-y', '-hide_banner', '-i', fFile, '-i', bFile, '-filter_complex', graph.replace('format=yuv420p[v]', 'format=yuvj420p[v]'),
-      '-map', '[v]', '-frames:v', '1', '-q:v', '2', out]);
-    addPhotoSphereXmp(out, W, H);
-    return '360.jpg';
+  try {
+    if (!isVideo) {
+      const out = path.join(dir, '360.jpg');
+      await run(['-y', '-hide_banner', '-filter_threads', '1', '-i', fFile, '-i', bFile, ...mapInputs,
+        '-filter_complex', graph, '-map', '[v]', '-frames:v', '1', '-q:v', '2', out]);
+      addPhotoSphereXmp(out, W, H);
+      return '360.jpg';
+    }
+
+    // Videoları eşzamanla: geç başlayanın başlangıcına göre erken başlayanı kırp
+    const latest = Math.max(front.startedAt, back.startedAt);
+    const fOff = Math.max(0, (latest - front.startedAt) / 1000);
+    const bOff = Math.max(0, (latest - back.startedAt) / 1000);
+    const out = path.join(dir, '360.mp4');
+    const args = ['-y', '-hide_banner', '-filter_threads', '1', '-filter_complex_threads', '1',
+      '-threads', '1', '-ss', fOff.toFixed(3), '-i', fFile,
+      '-threads', '1', '-ss', bOff.toFixed(3), '-i', bFile,
+      ...mapInputs,
+      '-filter_complex', graph, '-map', '[v]'];
+    const audioSrc = fi.hasAudio ? '0:a' : bi.hasAudio ? '1:a' : null;
+    if (audioSrc) args.push('-map', audioSrc, '-c:a', 'aac', '-b:a', '128k');
+    args.push('-t', String(shot.duration + 1), '-shortest', '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-crf', '21',
+      '-pix_fmt', 'yuv420p', '-threads', '1', out);
+    await run(args);
+    try { addSphericalV1(out); } catch (e) { console.warn('360 metadata eklenemedi:', e.message); }
+    return '360.mp4';
+  } finally {
+    fs.rm(xmapFile, () => {}); fs.rm(ymapFile, () => {});
   }
+}
 
-  // Videoları eşzamanla: geç başlayanın başlangıcına göre erken başlayanı kırp
-  const latest = Math.max(front.startedAt, back.startedAt);
-  const fOff = Math.max(0, (latest - front.startedAt) / 1000);
-  const bOff = Math.max(0, (latest - back.startedAt) / 1000);
-  const out = path.join(dir, '360.mp4');
-  const args = ['-y', '-hide_banner',
-    '-ss', fOff.toFixed(3), '-i', fFile,
-    '-ss', bOff.toFixed(3), '-i', bFile,
-    '-filter_complex', graph.replace('[0:v]', '[0:v]fps=30,').replace('[1:v]', '[1:v]fps=30,'),
-    '-map', '[v]'];
-  const audioSrc = fi.hasAudio ? '0:a' : bi.hasAudio ? '1:a' : null;
-  if (audioSrc) args.push('-map', audioSrc, '-c:a', 'aac', '-b:a', '128k');
-  args.push('-t', String(shot.duration + 1), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21',
-    '-pix_fmt', 'yuv420p', '-threads', '2', out);
-  await run(args);
-  try { addSphericalV1(out); } catch (e) { console.warn('360 metadata eklenemedi:', e.message); }
-  return '360.mp4';
+// Her çıkış pikseli için (equirect) hangi kameranın hangi pikselinden okunacağını hesapla.
+// Ön kamera +z yönüne, arka kamera -z yönüne bakar (180° dönük). Görülmeyen yerler 65535 = siyah.
+function buildMaps({ W, H, fW, bW, Hc, ff, bf, xmapFile, ymapFile }) {
+  const rad = (d) => (d * Math.PI) / 180;
+  const fTx = Math.tan(rad(ff.h) / 2), fTy = Math.tan(rad(ff.v) / 2);
+  const bTx = Math.tan(rad(bf.h) / 2), bTy = Math.tan(rad(bf.v) / 2);
+  const header = Buffer.from(`P5\n${W} ${H}\n65535\n`, 'latin1');
+  const xm = Buffer.alloc(W * H * 2), ym = Buffer.alloc(W * H * 2);
+  const sinLon = new Float64Array(W), cosLon = new Float64Array(W);
+  for (let x = 0; x < W; x++) {
+    const lon = ((x + 0.5) / W) * 2 * Math.PI - Math.PI;
+    sinLon[x] = Math.sin(lon); cosLon[x] = Math.cos(lon);
+  }
+  for (let y = 0; y < H; y++) {
+    const lat = Math.PI / 2 - ((y + 0.5) / H) * Math.PI;
+    const cl = Math.cos(lat), dy = Math.sin(lat);
+    for (let x = 0; x < W; x++) {
+      const dx = cl * sinLon[x], dz = cl * cosLon[x];
+      let px = 65535, py = 65535;
+      if (dz > 1e-6) { // ön kamera
+        const u = dx / dz / fTx, v = dy / dz / fTy;
+        if (u > -1 && u < 1 && v > -1 && v < 1) {
+          px = Math.min(fW - 1, Math.floor(((u + 1) / 2) * fW));
+          py = Math.min(Hc - 1, Math.floor(((1 - v) / 2) * Hc));
+        }
+      } else if (dz < -1e-6) { // arka kamera (yan yana dizide sağda)
+        const u = dx / dz / bTx, v = dy / -dz / bTy;
+        if (u > -1 && u < 1 && v > -1 && v < 1) {
+          px = fW + Math.min(bW - 1, Math.floor(((u + 1) / 2) * bW));
+          py = Math.min(Hc - 1, Math.floor(((1 - v) / 2) * Hc));
+        }
+      }
+      const i = (y * W + x) * 2;
+      xm.writeUInt16BE(px, i); ym.writeUInt16BE(py, i);
+    }
+  }
+  fs.writeFileSync(xmapFile, Buffer.concat([header, xm]));
+  fs.writeFileSync(ymapFile, Buffer.concat([header, ym]));
 }
 
 // ---- JPEG'e Photo Sphere (GPano) XMP ekle: Facebook/Google Fotoğraflar 360 olarak tanır ----
@@ -135,4 +188,4 @@ function addSphericalV1(file) {
   fs.writeFileSync(file, out);
 }
 
-module.exports = { stitch, fovs };
+module.exports = { stitch, fovs, buildMaps };
