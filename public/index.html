@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<title>Kamera 360</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main id="app">
+
+  <!-- Giriş -->
+  <section id="home" class="screen active">
+    <div class="brand">
+      <div class="logo">360</div>
+      <h1>Kamera 360</h1>
+      <p class="muted">İki telefonu sırt sırta bantla, tek tuşla 360° video ya da fotoğraf çek.</p>
+    </div>
+    <button id="btnCreate" class="btn primary big">Oda oluştur</button>
+    <div class="or"><span>ya da</span></div>
+    <form id="joinForm" class="join">
+      <input id="joinCode" inputmode="numeric" pattern="[0-9]*" maxlength="5" placeholder="Oda kodu" autocomplete="off">
+      <button class="btn big">Katıl</button>
+    </form>
+    <p id="homeErr" class="err"></p>
+    <a id="lastGallery" class="link hidden" href="#">Son odamın çekimleri →</a>
+  </section>
+
+  <!-- Oda -->
+  <section id="room" class="screen">
+    <header class="roomHead">
+      <div>
+        <div class="muted small">Oda kodu</div>
+        <div id="roomCode" class="code">-----</div>
+      </div>
+      <div class="roleTag" id="roleTag">Ön kamera</div>
+    </header>
+
+    <div class="members">
+      <div class="member" id="mFront"><span class="dot"></span>Telefon 1 (ön)</div>
+      <div class="member" id="mBack"><span class="dot"></span>Telefon 2 (arka)</div>
+    </div>
+
+    <div class="previewWrap">
+      <video id="preview" playsinline muted autoplay></video>
+      <div id="previewMsg" class="previewMsg">Kamera açılıyor…</div>
+      <div id="countdown" class="countdown hidden"></div>
+      <div id="recBadge" class="recBadge hidden">● KAYIT <span id="recTime">0</span></div>
+    </div>
+
+    <div class="camControls">
+      <label>Kamera
+        <select id="camSelect"></select>
+      </label>
+      <label id="zoomWrap" class="hidden">Yakınlaştırma <span id="zoomVal"></span>
+        <input id="zoom" type="range" step="0.1">
+      </label>
+      <p class="hint" id="camHint">En geniş açı için listede “Ultra Geniş / 0.5x” olanı seç.</p>
+    </div>
+
+    <div id="ownerPanel" class="panel">
+      <div class="seg" id="modeSeg">
+        <button data-mode="video" class="on">Video</button>
+        <button data-mode="photo">Fotoğraf</button>
+      </div>
+      <label id="durWrap">Süre
+        <select id="duration">
+          <option value="10">10 sn</option>
+          <option value="15" selected>15 sn</option>
+          <option value="30">30 sn</option>
+          <option value="60">60 sn</option>
+          <option value="120">2 dk</option>
+        </select>
+      </label>
+      <label>Kamera açısı (FOV) <span id="fovVal">108°</span>
+        <input id="fov" type="range" min="60" max="180" step="1" value="108">
+      </label>
+      <p class="hint">Ultra geniş kameralar genelde ~108–120°. Galeride sonradan değiştirip yeniden birleştirebilirsin.</p>
+      <p class="hint"><b>İpucu:</b> Telefonları ekranları birbirine bakacak, ikisi de <b>yatay</b> duracak şekilde bantla — yatayda yanlara daha çok alan girer, boşluk azalır.</p>
+      <button id="btnStart" class="btn primary big" disabled>Başlat (10 sn sonra)</button>
+      <p id="startHint" class="hint center">İki telefon da bağlanıp kamerası açılınca başlayabilirsin.</p>
+      <a id="galleryLink" class="btn ghost" href="#">Çekimler / Galeri</a>
+    </div>
+
+    <div id="guestPanel" class="panel hidden">
+      <p class="center">Bağlandın. Çekimi odayı kuran telefon başlatacak; geri sayım bu telefonda da sesli çalacak.</p>
+    </div>
+
+    <div id="activePanel" class="panel hidden">
+      <p id="activeText" class="center"></p>
+      <div class="row">
+        <button id="btnStop" class="btn">Durdur</button>
+        <button id="btnCancel" class="btn ghost">İptal</button>
+      </div>
+    </div>
+
+    <div id="uploadPanel" class="panel hidden">
+      <p id="uploadText" class="center">Yükleniyor…</p>
+      <div class="bar"><div id="uploadBar"></div></div>
+    </div>
+
+    <p id="roomErr" class="err"></p>
+    <button id="btnLeave" class="link">Odadan çık</button>
+  </section>
+</main>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
